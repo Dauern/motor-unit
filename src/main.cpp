@@ -1,4 +1,5 @@
 #include <Wire.h>
+#include <string>
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -13,6 +14,7 @@
 // Display config
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 32
+#define CHAR_BASE_SIZE 6
 
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
@@ -42,20 +44,77 @@ LimitedServo tempServo(TEMP_SERVO_PIN, 11, 110);
 
 LimitedServo rpmServo(RPM_SERVO_PIN, 0, 150);
 
-volatile int rotationCount = 0;
+volatile unsigned long rotationCount = 0;
 
 // Persistent storage config
 Preferences preferences;
 
-volatile int totalRotations = 0;
+volatile unsigned long totalRotations = 0;
+volatile unsigned long motoMilliseconds = 0;
+
+#define BTN_PIN 5
 
 // Count a rotation via the hall sensor and save it to the persistent storage
 void countRotation()
 {
   rotationCount++;
   totalRotations++;
-  preferences.putInt("rotationCount", totalRotations);
 }
+
+long temperature = 0;
+unsigned long rpm = 0;
+
+#define RPM_TEXT "rpm"
+
+// Clear display and the print all values
+void syncDisplay()
+{
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.setTextColor(WHITE);
+
+  // Print RPM so there is space for 4 digits
+  auto rpmStr = std::to_string(rpm);
+  display.setCursor((4 - rpmStr.length()) * CHAR_BASE_SIZE * 2, 0);
+  display.setTextSize(2);
+  display.print(rpm);
+
+  // Print RPM lable
+  display.setCursor(display.getCursorX() + 4, 6);
+  display.setTextSize(1);
+  display.print(RPM_TEXT);
+
+  // Print temperature
+  auto tpmText = std::to_string(temperature);
+  display.setCursor((SCREEN_WIDTH - tpmText.length() * CHAR_BASE_SIZE * 2) - CHAR_BASE_SIZE - 4, 0);
+  display.setTextSize(2);
+  display.print(temperature);
+
+  // Print temperature label
+  auto x = display.getCursorX();
+  display.setCursor(x + 4, 6);
+  display.setTextSize(1);
+  display.println("C");
+
+  // Print moto miliseconds
+  display.setTextSize(1);
+  display.setCursor(0, 22);
+  display.print(motoMilliseconds);
+
+  display.setCursor(display.getCursorX() + 4, 22);
+  display.setTextSize(1);
+  display.print("ms");
+
+  // Print total rotations
+  display.setCursor(display.getCursorX() + 2 * CHAR_BASE_SIZE, 22);
+  display.setTextSize(1);
+  display.println(totalRotations);
+
+  // Flush display
+  display.display();
+}
+
+unsigned long startMillis = 0;
 
 void setup()
 {
@@ -63,7 +122,16 @@ void setup()
 
   // Set up the persistently saved values
   preferences.begin("motor-unit", false);
-  totalRotations = preferences.getInt("rotationCount", 0);
+
+  // Reset total rotations if the button is pressed during start
+  pinMode(BTN_PIN, INPUT_PULLUP);
+  if (digitalRead(BTN_PIN) == LOW)
+  {
+    preferences.putInt("totalRotations", 0);
+    preferences.putInt("motoMilliseconds", 0);
+  }
+
+  totalRotations = preferences.getInt("totalRotations", 0);
 
   // Set up the display
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
@@ -73,13 +141,7 @@ void setup()
       ;
   }
 
-  display.clearDisplay();
-
-  display.setTextSize(2);
-  display.setTextColor(WHITE);
-  display.setCursor(0, 0);
-
-  display.display();
+  syncDisplay();
 
   // Set up the thermistor
   Thermistor *origin = new NTC_Thermistor_ESP32(
@@ -104,6 +166,8 @@ void setup()
   // Set up the hall sensor and hook in to the interrupt
   pinMode(HALL_PIN, INPUT);
   attachInterrupt(digitalPinToInterrupt(HALL_PIN), countRotation, FALLING);
+
+  startMillis = millis();
 }
 
 // Map temperature to servo angle
@@ -135,10 +199,25 @@ int mapRpmToAngle(long rpm)
 
 void loop()
 {
+  auto start = micros();
+
+  // Calculate moto milliseconds since the last measurement and add it to the total
+  auto currentMillis = start / 1000;
+  auto deltaMillis = currentMillis - startMillis;
+
+  if (deltaMillis > 0)
+  {
+    startMillis = currentMillis;
+    motoMilliseconds += deltaMillis;
+    preferences.putInt("motoMilliseconds", motoMilliseconds);
+  }
+
   // Measure RPM — if it takes too long, skip the rest of the measurements
-  long start = micros();
+
   while (rotationCount < RPM_SAMPLE_SIZE)
   {
+    syncDisplay();
+
     // Leave the measurement if it takes more than 2 seconds
     if (micros() - start > 2000000)
     {
@@ -147,28 +226,20 @@ void loop()
   }
 
   // Calculate RPM
-  float seconds = (micros() - start) / 1000000.0;
-  long rpm = rotationCount / seconds * 60.0;
+  auto seconds = (micros() - start) / 1000000.0;
+  rpm = rotationCount / seconds * 60.0;
   rotationCount = 0;
 
   // Set RPM servo position
   rpmServo.setPosition(mapRpmToAngle(rpm));
 
   // Get temperature
-  long temperature = thermistor->readCelsius();
+  temperature = thermistor->readCelsius();
 
   // Set temperature servo position
   tempServo.setPosition(mapTemperatureToAngle(temperature));
 
-  // Handle displaying the values
-  display.clearDisplay();
-  display.setCursor(0, 0);
+  syncDisplay();
 
-  display.println(rpm);
-  display.print(totalRotations);
-
-  display.print(' ');
-  display.println(temperature);
-
-  display.display();
+  preferences.putInt("totalRotations", totalRotations);
 }
