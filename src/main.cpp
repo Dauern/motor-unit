@@ -99,11 +99,11 @@ void syncDisplay()
   // Print moto miliseconds
   display.setTextSize(1);
   display.setCursor(0, 22);
-  display.print(motoMilliseconds);
+  display.print(motoMilliseconds / 1000.0 / 60.0 / 60.0);
 
   display.setCursor(display.getCursorX() + 4, 22);
   display.setTextSize(1);
-  display.print("ms");
+  display.print("h");
 
   // Print total rotations
   display.setCursor(display.getCursorX() + 2 * CHAR_BASE_SIZE, 22);
@@ -201,19 +201,7 @@ void loop()
 {
   auto start = micros();
 
-  // Calculate moto milliseconds since the last measurement and add it to the total
-  auto currentMillis = start / 1000;
-  auto deltaMillis = currentMillis - startMillis;
-
-  if (deltaMillis > 0)
-  {
-    startMillis = currentMillis;
-    motoMilliseconds += deltaMillis;
-    preferences.putInt("motoMilliseconds", motoMilliseconds);
-  }
-
   // Measure RPM — if it takes too long, skip the rest of the measurements
-
   while (rotationCount < RPM_SAMPLE_SIZE)
   {
     syncDisplay();
@@ -229,6 +217,17 @@ void loop()
   auto seconds = (micros() - start) / 1000000.0;
   rpm = rotationCount / seconds * 60.0;
   rotationCount = 0;
+
+  // Calculate moto milliseconds since the last measurement and add it to the total if the RPM is more than 100
+  auto currentMillis = start / 1000;
+  auto deltaMillis = currentMillis - startMillis;
+  startMillis = currentMillis;
+
+  if (deltaMillis > 0 && rpm > 100)
+  {
+    motoMilliseconds += deltaMillis;
+    preferences.putInt("motoMilliseconds", motoMilliseconds);
+  }
 
   // Set RPM servo position
   rpmServo.setPosition(mapRpmToAngle(rpm));
