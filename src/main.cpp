@@ -127,11 +127,12 @@ void setup()
   pinMode(BTN_PIN, INPUT_PULLUP);
   if (digitalRead(BTN_PIN) == LOW)
   {
-    preferences.putInt("totalRotations", 0);
-    preferences.putInt("motoMilliseconds", 0);
+    preferences.putULong("totalRotations", 0);
+    preferences.putULong("motoMilliseconds", 0);
   }
 
-  totalRotations = preferences.getInt("totalRotations", 0);
+  totalRotations = preferences.getULong("totalRotations", 0);
+  motoMilliseconds = preferences.getULong("motoMilliseconds", 0);
 
   // Set up the display
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
@@ -226,7 +227,7 @@ void loop()
   if (deltaMillis > 0 && rpm > 100)
   {
     motoMilliseconds += deltaMillis;
-    preferences.putInt("motoMilliseconds", motoMilliseconds);
+    preferences.putULong("motoMilliseconds", motoMilliseconds);
   }
 
   // Set RPM servo position
@@ -240,5 +241,5 @@ void loop()
 
   syncDisplay();
 
-  preferences.putInt("totalRotations", totalRotations);
+  preferences.putULong("totalRotations", totalRotations);
 }
