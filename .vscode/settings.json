@@ -1,0 +1,6 @@
+{
+  "files.associations": {
+    ".env": "shellscript",
+    "new": "cpp"
+  }
+}
